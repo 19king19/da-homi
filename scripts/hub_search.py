@@ -15,9 +15,14 @@ that does the task. That sort is gone.
 
 This ranks; it does not vet. Vetting is step 4 of the Da Homi loop and
 is done by vet.py plus a human reading every REVIEW before anything runs.
+
+provenance(item) (v2.1) reports where a candidate comes from (age, last
+push, owner type, fork, archive, license, stars, forks, description) and
+raises plain flags from those facts. Flags inform the reader. They never
+refuse anything and never feed score(), which is unchanged.
 """
 import argparse, json, math, os, re, subprocess, sys, urllib.parse, urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 API = "https://api.github.com/search/repositories"
 
@@ -76,6 +81,62 @@ def score(item, query="", position=0):
         hay = ((item.get("full_name") or "") + " " + (item.get("description") or "")).lower()
         s += min(45, 15 * sum(1 for t in terms if t in hay))
     return round(s, 1)
+
+
+YOUNG_DAYS, STALE_DAYS = 90, 365
+
+
+def _when(value):
+    """A GitHub timestamp as an aware datetime, or None when missing or unparseable."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        when = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def provenance(item, now=None):
+    """Provenance facts for one search item, plus sorted flags. Flags only."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    owner = item.get("owner") if isinstance(item.get("owner"), dict) else {}
+    lic = item.get("license") if isinstance(item.get("license"), dict) else {}
+    info = {
+        "created_at": item.get("created_at"),
+        "pushed_at": item.get("pushed_at"),
+        "owner_type": owner.get("type"),
+        "fork": bool(item.get("fork")),
+        "archived": bool(item.get("archived")),
+        "license": lic.get("spdx_id"),
+        "stars": item.get("stargazers_count") or 0,
+        "forks": item.get("forks_count") or 0,
+        "description_present": bool((item.get("description") or "").strip()),
+    }
+    flags = set()
+    created, pushed = _when(info["created_at"]), _when(info["pushed_at"])
+    if created is None or pushed is None:
+        flags.add("dates_unknown")  # never guess an age
+    if created is not None and now - created < timedelta(days=YOUNG_DAYS):
+        flags.add("young")
+    if pushed is not None and now - pushed > timedelta(days=STALE_DAYS):
+        flags.add("stale")
+    if info["fork"]:
+        flags.add("fork")
+    if info["archived"]:
+        flags.add("archived")
+    if info["license"] is None:
+        flags.add("no_license")
+    if info["stars"] < 10 and info["forks"] < 3:
+        flags.add("thin")
+    if info["owner_type"] == "User":
+        flags.add("personal_account")
+    if not info["description_present"]:
+        flags.add("no_description")
+    info["flags"] = sorted(flags)
+    return info
 
 
 def main():
