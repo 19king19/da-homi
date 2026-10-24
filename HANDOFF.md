@@ -54,3 +54,26 @@ Start every task at the cheapest brain tier that fits: scout for search, fetch, 
 ## Install
 
 Copy the da-homi/ folder into the agent's skills directory (for Muse: ~/.claude/skills/ or the workspace custom-skills folder). The GitHub CLI (gh), authenticated, is recommended so searches are not rate-limited. Without it, scripts/hub_search.py falls back to the public GitHub API.
+
+## Pinning and provenance (v2.1)
+
+Pin every fetch you can. The pin option on fetch.py takes a tag, a full SHA, or a short SHA. A full SHA fetches exactly that commit even after the branch has moved on, a tag fetches the commit the tag names, and a short SHA only confirms that the tip of the default branch still starts with it. When the commit that arrives is not the one pinned, fetch.py prints PIN MISMATCH, moves the fetch aside, writes the manifest anyway, and exits 1. Treat that like a refusal and find out why before going further. When you reuse a fetch from the cache, check it first with the verify option, which never clones: PIN OK exits 0, PIN DRIFT exits 1, and a missing fetch exits 2. Unpinned fetches still work and print the short SHA to pin next time, so write it into DA_HOMI_MEMORY.md with the install.
+
+Provenance flags come from the hunt and ride along into the fetch manifest, with no_tags added when the remote has no tags at all. The deep option on the hunt adds release and contributor checks for the top five candidates. Read the flags, mention the ones that matter when you report what you found, and keep going, because a flag never refuses a fetch, never changes a score, and never changes an exit code. The host setup that keeps fetched code away from the owner's files, keys, and network is in assets/HOUSE.md.
+
+```
+python3 fetch.py owner/repo --receipt <receipt.json> --pin <tag or sha>
+python3 fetch.py owner/repo --pin <tag or sha> --verify
+python3 da_homi.py hunt "the missing capability" --deep
+```
+
+## Automatic updates (v2.2)
+
+Installed copies do not need a fresh ZIP by hand for every release. The Hub publishes a version manifest at one stable URL, and the member token gates it and the download:
+
+```
+python3 scripts/update.py check --manifest <hub manifest url>
+python3 scripts/update.py apply --manifest <hub manifest url>
+```
+
+Apply backs the install up first, never overwrites the live DA_HOMI_MEMORY.md, and never touches da-homi-cache/. A sha256 mismatch refuses with nothing changed. The operator's manifest format is in assets/update-manifest.example.json.
