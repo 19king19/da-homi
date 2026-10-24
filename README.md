@@ -34,3 +34,20 @@ Optional but recommended: the GitHub CLI (`gh`) authenticated, so searches are n
 ## The boundary that matters
 
 Da Homi expands capability, never authority. Your agent's approval rules for sending, spending, publishing, and deleting stay exactly as they were. Da Homi gets the tool ready. The human still calls the shot.
+
+## Pinning and provenance (v2.1)
+
+Fetches can now be pinned. Give the fetcher a tag, a full commit SHA, or a short SHA of 7 to 39 hex characters, and it checks the commit it actually got against that pin. A full SHA fetches that exact commit even after the branch moves on, a tag fetches the commit the tag names, and a short SHA is checked against the tip of the default branch. A match prints the resolved commit, and the fetch carries on as before. A mismatch moves the fetch aside, still writes the manifest with the pin marked unmatched, and exits 1, so nothing at the original path can run by accident. An unpinned fetch works as it always did and prints the short SHA to pin next time. The verify option checks a fetch that already exists against a pin without cloning anything, and it exits 0 when the fetch still matches and 1 when it has drifted.
+
+```
+python3 scripts/fetch.py owner/repo --receipt <receipt.json> --pin v1.4.0
+python3 scripts/fetch.py owner/repo --receipt <receipt.json> --pin <full or short sha>
+python3 scripts/fetch.py owner/repo --pin <tag or sha> --verify
+python3 scripts/da_homi.py hunt "the missing capability" --deep
+```
+
+Every hunt now records provenance for each candidate: when the repo was created and last pushed, whether a person or an organization owns it, whether it is a fork or archived, its license, its stars and forks, and whether it has a description. From those facts it raises plain flags (`young`, `stale`, `thin`, `fork`, `archived`, `no_license`, `personal_account`, `no_description`, and `dates_unknown` when a date is missing) and prints them in brackets beside the candidate. The deep option adds release and contributor checks for the top five candidates, flagging `no_releases` and `single_contributor`, or `deep_unavailable` when GitHub does not answer. The fetcher copies the candidate's flags from the receipt into its manifest and adds `no_tags` when the remote has no tags. Flags are for the person reading the receipt. They never refuse a fetch, never lower a score, and never change an exit code. For where fetched code should run on the host, see the host setup section in `assets/HOUSE.md`.
+
+## Automatic updates (v2.2)
+
+An installed copy checks a Hub version manifest and updates itself, privately. The member token gates the manifest and the download, a sha256 mismatch refuses the update, the live memory file and the cache are never touched, and every apply backs the install up first. See the updates section in `SKILL.md` and the manifest format in `assets/update-manifest.example.json`.
