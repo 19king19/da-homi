@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Da Homi harness: the smart layer. Decides which model tier a task gets,
-so Da Homi never overspends: cheapest tier that can plausibly succeed,
-verified, escalating only on failure.
+"""Da Homi harness: keyword classifier and routing log. It does NOT call a
+model. It maps a task to a model tier by keyword class, so Da Homi never
+overspends: cheapest tier that can plausibly succeed. Escalation is manual
+until a failure counter is coded: the escalation rule lives as prose in
+routing.json, with no failure counter behind it.
 
 Reads scripts/routing.json (tiers, task classes, gateway plan), classifies
 the task, prints the routing decision, and logs it to
