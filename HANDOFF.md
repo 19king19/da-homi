@@ -1,6 +1,6 @@
-# Da Homi Handoff
+# Da Homi Handoff (v2, lighter build)
 
-Hand this file, plus da-homi-handoff-2026-10-23.zip, to the agent or person who needs to run the same protocol.
+Hand this file, plus the Da Homi package, to the agent or person who needs to run the same protocol.
 
 ## What you are installing
 
@@ -22,25 +22,28 @@ Then you come back with the task done, or with the one real blocker and the clos
 
 1. Check the house first (see search order above).
 2. Search GitHub and score before you touch anything: does it actually do the task, is it maintained, is the license usable, is there real community signal, does it fit the stack, how heavy is the install.
-3. Vet for safety before anything runs. Stop cold on: credential or token theft, network calls to unknown hosts unrelated to the task, obfuscated code with no source, curl pipe to shell from an untrusted source, requests for the user's secrets, destructive defaults. When in doubt, test in a sandbox with no real data.
-4. Fetch and install into one marked home, never scattered.
-5. Test on a small real case. Installed is not working.
-6. Finish the original task. The hunt was never the task.
-7. Log it in your own DA_HOMI_MEMORY.md: what was needed, what was found, what worked, and every mistake, so the same miss never happens twice.
+3. Vet for safety before anything runs. vet.py is a tripwire, not clearance. Stop cold on: credential or token theft, network calls to unknown hosts unrelated to the task, obfuscated code with no source, curl pipe to shell from an untrusted source, requests for the user's secrets, destructive defaults. REVIEW means a human reads the flagged spots before anything runs.
+4. Fetch into one marked home, never scattered, and never install at fetch time. fetch.py clones shallow, records the commit SHA and a sha256 manifest, vets automatically, and quarantines BLOCKED fetches. The fetch must be bound to a hunt receipt, and must not match the memory file's Never install list.
+5. Install separately, hooks disabled: npm with --ignore-scripts, and any setup.py or build file read before it runs. Install is not human-gated by Da Homi; the host's approval rules are the gate.
+6. Test on a small real case with trial.py, timeout and written record. Installed is not working.
+7. Finish the original task. The hunt was never the task.
+8. Log it in your own DA_HOMI_MEMORY.md: what was needed, what was found, what worked, and every mistake, so the same miss never happens twice. Cap: 200 lines.
 
 ## The harness. Coded, not promised.
 
-The zip carries the enforcement scripts in da-homi/scripts/:
+The package carries the enforcement scripts in scripts/:
 
-- `python3 da_homi.py hunt "the missing capability"` runs the search leg and writes a run receipt to da-homi-cache/runs/.
-- `python3 vet.py <directory>` scans anything fetched before it executes. Hard flags block the run.
-- `python3 excuse_gate.py --text "your draft reply"` blocks any "I can't" claim that has no fresh run receipt behind it.
+- `python3 da_homi.py hunt "the missing capability"` runs the search leg and writes a run receipt with an explicit outcome. Only terminal outcomes license a limitation claim. Candidates found means CONTINUE.
+- `python3 vet.py <directory> [--json]` scans anything fetched before it executes. Exit 0 is CLEAN, exit 3 is REVIEW, exit 1 is BLOCKED.
+- `python3 excuse_gate.py --text "your draft reply" [--task "the task"]` blocks any capability claim that has no fresh terminal receipt bound to this task. Authority declines pass without a receipt.
+- `python3 fetch.py owner/repo --receipt <receipt.json>` clones shallow, records SHA and manifest, vets, quarantines BLOCKED.
+- `python3 trial.py <dir> -- <command>` runs the test with a timeout and a record, and refuses install-shaped commands unless --allow-install is passed explicitly.
 
-A limitation may only be reported after the loop has actually run and a receipt proves it.
+A limitation may only be reported after the loop has actually run and a terminal receipt proves it.
 
 ## Smart routing
 
-Start every task at the cheapest brain tier that fits: scout for search, fetch, and triage; builder for code, drafts, and vetting; brain for strategy and final judgment. Escalate one tier only after a failure. Never default to the top tier.
+Start every task at the cheapest brain tier that fits: scout for search, fetch, and triage; builder for code, drafts, and vetting; brain for strategy and final judgment. Escalate one tier only after a failure. Never default to the top tier. The routing layer is a keyword classifier with a log; it does not call a model.
 
 ## Boundaries
 
