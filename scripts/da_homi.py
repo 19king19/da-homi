@@ -17,11 +17,17 @@ Outcomes:
     test_failed   a trial failed (written by trial.py)
 
 Usage:
-    python3 da_homi.py hunt "the missing capability in plain words"
+    python3 da_homi.py hunt "the missing capability in plain words" [--deep]
+
+v2.1: every candidate carries provenance (hub_search.provenance) and its
+flags print in brackets on the candidate line. --deep adds a releases and
+a contributors check for the top 5 candidates. Flags inform the reader:
+they never refuse anything, never change a score, and never change the
+exit code. The receipt stays version 2 and lists its "features".
 
 Exit: 0 = CONTINUE (candidates found), 3 = terminal (reportable blocker).
 """
-import json, os, sys, time
+import json, os, sys, time, urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +37,9 @@ import hub_search  # noqa: E402
 CACHE = os.path.join(HERE, "..", "da-homi-cache", "runs")
 
 TERMINAL = {"no_candidates", "search_failed", "all_blocked", "fetch_failed", "test_failed"}
+
+DEEP_TOP = 5
+API_REPOS = "https://api.github.com/repos"
 
 
 def variants(query):
@@ -47,7 +56,44 @@ def variants(query):
     return res[:3]
 
 
-def hunt(query, cache_dir=None):
+def github_get(url, token):
+    # Same headers and token lookup as hub_search.search.
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": "da-homi-hub-search"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = resp.read().decode("utf-8").strip()
+    return json.loads(body) if body else []  # an empty repo's contributors come back 204, no body
+
+
+def deep_provenance(candidates, top=DEEP_TOP):
+    """--deep: releases and contributors for the top candidates, kept in the
+    same provenance dict. A failed request flags deep_unavailable and moves on."""
+    token = hub_search.gh_token()
+    for c in candidates[:top]:
+        prov, deep = c["provenance"], {}
+        flags = set(prov["flags"])
+        for key, query in (("releases", "releases?per_page=1"),
+                           ("contributors", "contributors?per_page=2&anon=0")):
+            try:
+                data = github_get(f"{API_REPOS}/{c['repo']}/{query}", token)
+                if not isinstance(data, list):
+                    raise ValueError(f"unexpected {key} response")
+                deep[key] = len(data)
+            except Exception as e:
+                deep[key] = None
+                deep.setdefault("errors", []).append(f"{key}: {e}"[:200])
+                flags.add("deep_unavailable")
+        if deep["releases"] == 0:
+            flags.add("no_releases")
+        if deep["contributors"] == 1:
+            flags.add("single_contributor")
+        prov["deep"] = deep
+        prov["flags"] = sorted(flags)
+
+
+def hunt(query, cache_dir=None, deep=False):
     cache = cache_dir or CACHE
     os.makedirs(cache, exist_ok=True)
     tried, pool = [], {}
@@ -68,7 +114,10 @@ def hunt(query, cache_dir=None):
         "pushed_at": (it.get("pushed_at") or "")[:10],
         "score": hub_search.score(it, query, position),
         "description": (it.get("description") or "").strip(),
+        "provenance": hub_search.provenance(it),
     } for position, it in ranked]
+    if deep:
+        deep_provenance(candidates)
     if candidates:
         outcome = "CONTINUE"
     elif any("error" not in t for t in tried):
@@ -78,6 +127,7 @@ def hunt(query, cache_dir=None):
     receipt = {
         "homi": "da-homi/run-receipt",
         "version": 2,
+        "features": ["provenance", "deep_provenance"] if deep else ["provenance"],
         "task_query": query,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "queries_tried": tried,
@@ -96,7 +146,9 @@ def hunt(query, cache_dir=None):
     print(f"RECEIPT: {path}")
     print(f"OUTCOME: {outcome}")
     for c in candidates:
-        print(f"{c['score']:>6}  {c['repo']}  ★{c['stars']}  {c['license'] or 'no license'}  pushed {c['pushed_at']}")
+        flags = c["provenance"]["flags"]
+        print(f"{c['score']:>6}  {c['repo']}  ★{c['stars']}  {c['license'] or 'no license'}  pushed {c['pushed_at']}"
+              + (f"  [{', '.join(flags)}]" if flags else ""))
         if c["description"]:
             print(f"        {c['description'][:140]}")
     if outcome != "CONTINUE":
@@ -104,8 +156,15 @@ def hunt(query, cache_dir=None):
     return 0 if outcome == "CONTINUE" else 3
 
 
+def hunt_args(argv):
+    """Split hunt's arguments: --deep may sit anywhere and never joins the query."""
+    return " ".join(a for a in argv if a != "--deep").strip(), "--deep" in argv
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "hunt":
-        sys.exit(hunt(" ".join(sys.argv[2:])))
+        query, deep = hunt_args(sys.argv[2:])
+        if query:
+            sys.exit(hunt(query, deep=deep))
     print(__doc__)
     sys.exit(2)
