@@ -35,11 +35,12 @@ Load `DA_HOMI_MEMORY.md` (beside this skill, or in the workspace root) at activa
 1. **Check the house first.** Installed skills, existing tools, the workspace, prior work. Never fetch a duplicate of something that already exists. Half of "missing" capabilities are already in the house under another name.
 2. **Search the hub.** GitHub, from several angles: the task's plain words, the technical term, the category, the known leaders in the space. In 19Keys' house use the github skill (`gh api GET '/search/repositories?q=...'`). Standalone, run `scripts/hub_search.py "<query>"`. Also check the skill hubs and registries (Anthropic's official skills repo and plugin directory first, then the community directories) when the missing piece is a skill rather than a tool.
 3. **Score before you touch.** Rank candidates on: does it actually do the task, is it maintained (recent commits, answered issues), license usable, community signal (stars, forks, real users), fit with the user's stack, install weight. Dead, forked, or single-commit repos lose to living ones. Present the shortlist when the user asked to see options; otherwise take the winner and move.
-4. **Vet for safety. Nothing runs unvetted.** Read the code or at minimum the install path, entry points, and anything that executes on install. Red flags that stop the run cold: credential or token exfiltration, network calls to unknown hosts unrelated to the task, obfuscated or minified-only code with no source, `curl | sh` from an untrusted source, requests for the user's secrets, destructive defaults. When in doubt, run it in a sandbox or scratch directory with no access to the user's real data, on a small test case first.
-5. **Fetch and install into a marked home.** Everything Da Homi brings in lands in one visible place (a `da-homi-cache/` or the house's existing repos/skills folders), never scattered. Record what was installed, from where, at what version, in the memory file.
-6. **Test on a small real case.** A tool that installs is not a tool that works. Run the smallest end-to-end test that proves it does the job.
-7. **Finish the original task.** The hunt was never the task. Deliver the outcome the user asked for, using the new capability.
-8. **Log it.** Append to `DA_HOMI_MEMORY.md`: what was needed, what was found and installed, what worked, and every mistake made on the way, with the fix. A mistake that is not written down will be made again.
+4. **Vet for safety. Nothing runs unvetted.** Run `scripts/vet.py <dir>` on anything fetched before it executes. It is a tripwire, not a clearance: a CLEAN verdict means the tripwire found nothing, not that the code is safe. Hard flags stop the run cold. Soft flags and hard flags found only in tests or docs mark the fetch REVIEW, and a human reads the flagged spots before anything in it runs. Red flags that stop the run cold: credential or token exfiltration, network calls to unknown hosts unrelated to the task, obfuscated or minified-only code with no source, `curl | sh` from an untrusted source, requests for the user's secrets, destructive defaults. When in doubt, test on a small case first, in a scratch directory with no access to the user's real data.
+5. **Fetch into a marked home, never install at fetch time.** Run `scripts/fetch.py owner/repo --receipt <receipt.json>`. It clones shallow, records the commit SHA and a sha256 manifest, vets automatically, and quarantines BLOCKED fetches by renaming them. It never runs install hooks, setup scripts, or any code from the fetched repo. Everything Da Homi brings in lands in one visible place (a `da-homi-cache/` or the house's existing repos/skills folders), never scattered. The fetch must be bound to a hunt receipt: the repo has to be one the loop actually found and scored, and it must not match the memory file's Never install list.
+6. **Install separately, hooks disabled.** Install is its own step after the vet, and it is not human-gated by Da Homi: the host's approval rules are the gate that already exists. Read the install path first. Disable install hooks: `npm install --ignore-scripts`, and read any setup.py or build file before running it. Do not let a trial command install anything unless you pass `--allow-install` to `trial.py` on purpose, and that allowance is recorded.
+7. **Test on a small real case.** Run `scripts/trial.py <dir> -- <test command>` with a timeout. A tool that installs is not a tool that works. Run the smallest end-to-end test that proves it does the job. Trial does not sandbox by default, because legitimate tools need their environment, auth, and network to prove they work. Pass `--fresh-home` when the test does not need the real HOME.
+8. **Finish the original task.** The hunt was never the task. Deliver the outcome the user asked for, using the new capability.
+9. **Log it.** Append to `DA_HOMI_MEMORY.md`: what was needed, what was found and installed, what worked, and every mistake made on the way, with the fix. A mistake that is not written down will be made again.
 
 ## The memory file
 
@@ -49,6 +50,8 @@ Load `DA_HOMI_MEMORY.md` (beside this skill, or in the workspace root) at activa
 - **Mistakes.** Date, what went wrong, why, the fix, and the rule that prevents a repeat. Read before every run. Written after every run that had a miss, including near misses.
 
 The template ships at `assets/DA_HOMI_MEMORY.template.md`. Create the live file from it on first activation if none exists.
+
+**Cap: 200 lines.** When the file reaches 200 lines, compress Mistakes into rules and keep the Installed section as the canonical cache index. See PRUNING.md where it is present: prune from active memory, never from the record.
 
 ## Boundaries
 
@@ -61,38 +64,26 @@ The template ships at `assets/DA_HOMI_MEMORY.template.md`. Create the live file 
 
 Da Homi is not just instructions. It ships enforcement code in `scripts/`, and the loop is not considered run until the code says so:
 
-- **`da_homi.py hunt "<capability>"`** runs the search leg mechanically (several query angles, scored candidates) and writes a **run receipt** to `da-homi-cache/runs/`. The receipt is the proof the loop ran.
-- **`vet.py <dir>`** statically scans anything fetched before it executes. Hard flags (pipe-to-shell installs, SSH-key access, credential-file reads, exfiltration shapes) BLOCK the run. Soft flags mark it REVIEW. Nothing unvetted runs, and the vetter's verdict goes in the report.
-- **`excuse_gate.py`** scans a draft response for limitation claims ("I can't", "I'm unable", "no way to"). A claim passes ONLY with a fresh run receipt behind it. No receipt, no excuse: the response is blocked and the agent is sent back to run the loop. A real blocker is reportable precisely because the receipt shows the hunt happened and what it found.
+- **`da_homi.py hunt "<capability>"`** runs the search leg mechanically (several query angles, scored candidates) and writes a **run receipt** to `da-homi-cache/runs/`. The receipt carries an explicit outcome. Only terminal outcomes (no_candidates, search_failed, all_blocked, fetch_failed, test_failed) license a limitation claim. A receipt showing candidates found returns CONTINUE: finish the loop, do not report a blocker yet. Exit 0 is CONTINUE, exit 3 is a terminal, reportable blocker.
+- **`vet.py <dir> [--json]`** is the tripwire described in step 4. Exit 0 is CLEAN, exit 3 is REVIEW (a human reads the flagged spots before anything runs), exit 1 is BLOCKED, exit 2 is usage. REVIEW is its own code on purpose, so no automation can mistake it for CLEAN. Large and unscanned files are listed as SKIPPED, visible, never silent.
+- **`excuse_gate.py --text "<draft>" [--task "<task>"]`** scans a draft response for limitation claims. A capability claim passes only with a fresh (24 hour) terminal receipt bound to this task, by token overlap with the receipt's task query. Authority and policy declines pass without a receipt. The excuse phrase list is unchanged on purpose: the gate must not learn to suppress an agent's "I won't" and fight the host's approval rules. A real blocker is reportable precisely because the receipt shows the hunt happened and what it found.
+- **`fetch.py owner/repo --receipt <receipt.json>`** clones shallow, records commit SHA and a sha256 manifest, vets automatically, quarantines BLOCKED fetches, and never installs or runs fetched code.
+- **`trial.py <dir> -- <command>`** runs the test with a timeout and a written record, and refuses install-shaped commands unless `--allow-install` is passed explicitly.
 
-A host agent that wires these three in has made excuses mechanically difficult, not just discouraged. That is the difference between a product description and a harness.
+A host agent that wires these in has made excuses mechanically difficult, not just discouraged. That is the difference between a product description and a harness.
 
 ## The smart layer: model routing
 
-Da Homi also decides how much brain a task deserves, so the homie never overspends on its own work. The routing brain is coded in `scripts/route.py` with its config in `scripts/routing.json`:
+Da Homi also decides how much brain a task deserves, so the homie never overspends on its own work. The routing layer is a keyword classifier with a log, coded in `scripts/route.py` with its config in `scripts/routing.json`. It does not call a model, and escalation is manual until a failure counter is coded:
 
 - **Three tiers.** Scout (cheapest sufficient: search, fetch, triage, classify), Builder (mid: code, drafts, vetting judgments, summaries), Brain (frontier: strategy, synthesis, final judgment). Every task starts at the cheapest tier its class maps to.
 - **Escalation, not default.** If the output fails verification or the task fails once, escalate one tier. Two failures reaches Brain. Starting at Brain by default is the overspend this layer exists to kill.
 - **Gateways.** LiteLLM is the primary serving layer: one self-hosted endpoint for every agent, per-agent keys, hard budget caps, full cost log. NVIDIA Switchyard is the judge layer piloted on top: it judges the ambiguous requests, and can switch models mid-run. If neither fits a deployment, the fallback primitive is a TypeSafe/Jev unit scoring the required capability tier, wired into LiteLLM model groups. Da Homi decides which layer a request needs: the deterministic class rules decide first (free, covers most traffic), the judge only sees what the rules cannot place.
 - **Auditable.** Every routing decision is logged to `da-homi-cache/routing/`, so spend can be checked against outcomes and the class map corrected where it wastes money in either direction.
 
-## The avatar: energetic engineering
+## Avatar and house
 
-Da Homi has a face. When the skill is installed, Da Homi pops up as a small living avatar, the same way Muse and Dots have theirs, and his energy is engineered, not decorative:
+Da Homi has a face, and it has a home setup. Both live in their own files so this skill stays operating instructions only:
 
-- **Engine.** The pop-up ships on a state-machine animation runtime (Rive is the reference pick: tiny, MIT React runtime, built for interactive characters). The 3D upgrade path is VRM on three-vrm (MIT, pixiv). Full companion frameworks like Airi (MIT, 50k+ stars) are the heavyweight reference, not the embed: Da Homi's avatar must stay light enough to ship inside a skill.
-- **States are the harness, made visible.** The avatar never plays random animation. He plays the loop: pop-in with a bounce when Da Homi activates, scanning eyes and a radar sweep while the hunt runs, a magnifier lean-in during the vet, a celebration on the test pass, a head-scratch and a notebook scribble when a mistake gets logged to memory, breathing and blinks at idle.
-- **Motion principles.** Spring physics on every entrance, squash and stretch on reactions, anticipation before big moves, no linear fades. Energy is the brand: he should feel like he is happy to go get it.
-- **Character.** One original Da Homi character, consistent across states. He is a mascot, never a real person's face. Lead design (set by 19Keys 2026-10-21): minimalist flat vector, black knit beanie with a small gold crescent, tiny beady dot eyes, small smile, plain black hoodie, thin gold crescent chain. Art lives in `assets/character/` (v2 files lead; the v1 cap-and-anime plates are kept for reference). State plates are sticker-style with the backing baked in; the rigged transparent build is the production step.
-- **The Key (signature, set by 19Keys 2026-10-21).** Da Homi carries a large ornate gold key. It is his signature prop and the payoff beat of the loop: the user asks, Da Homi hunts and vets, then he turns the key and unlocks what they need. The unlock state (`da-homi-v2-unlock.webp`) fires when the found capability is ready to use. Never show the key turn before the test passes; the key only turns on verified work.
-- **3D route.** The same design holds as a soft 3D vinyl-toy render (`da-homi-3d-key.webp`, test approved as a direction 2026-10-21). Production 3D means a VRM model via pixiv/three-vrm, with the cloned Airi repo as the reference runtime; use 3D where a living character earns it (app, stream overlay, product), and keep the flat 2D rig as the portable pop-up inside the skill itself.
-- **Two bodies, one homie (set by 19Keys 2026-10-21).** Da Homi is never locked to one body. Pop-ups switch off between 2D and 3D: every activation can roll either body, and the state set (pop-in, hunting, success, unlock) exists in both. The demo at `assets/avatar/popup-demo.html` shows the switch working.
-- **Distribution (set by 19Keys 2026-10-21).** Da Homi goes out by request: anyone who sends a request gets the package and runs their own. Each runner's copy carries the blank memory template; their Da Homi learns their world, and no runner's memory ever travels with the package.
-
-## In 19Keys' house
-
-Da Homi is the upgrade of the existing GitHub system, not a replacement:
-
-- The github skill (`~/workspace/skills/github/`) is the authenticated hand: its `gh` CLI and operating rules apply to every search and fetch.
-- The hunt engine (`~/workspace/.jarvis/github-hunt/hunt.py`, seen list, quality bar) and the three daily hunt jobs are Da Homi's scheduled mode: they keep scanning his lanes (AI video and motion, agent skills, creator tools, GTM and funnel systems, 3D globes) so the cache stays warm before he asks.
-- Da Homi adds what the hunts never had: the on-demand reflex when a live task hits a wall, the safety vet, the fetch-test-finish loop, and the memory of mistakes.
+- Avatar, states, and design: `assets/AVATAR.md`
+- In 19Keys' house, the github skill, hunt engine, and scheduled mode: `assets/HOUSE.md`
