@@ -37,6 +37,14 @@ Load `DA_HOMI_MEMORY.md` (beside this skill, or in the workspace root) at activa
 3. **Score before you touch.** Rank candidates on: does it actually do the task, is it maintained (recent commits, answered issues), license usable, community signal (stars, forks, real users), fit with the user's stack, install weight. Dead, forked, or single-commit repos lose to living ones. Present the shortlist when the user asked to see options; otherwise take the winner and move.
 4. **Vet for safety. Nothing runs unvetted.** Run `scripts/vet.py <dir>` on anything fetched before it executes. It is a tripwire, not a clearance: a CLEAN verdict means the tripwire found nothing, not that the code is safe. Hard flags stop the run cold. Soft flags and hard flags found only in tests or docs mark the fetch REVIEW, and a human reads the flagged spots before anything in it runs. Red flags that stop the run cold: credential or token exfiltration, network calls to unknown hosts unrelated to the task, obfuscated or minified-only code with no source, `curl | sh` from an untrusted source, requests for the user's secrets, destructive defaults. When in doubt, test on a small case first, in a scratch directory with no access to the user's real data.
 5. **Fetch into a marked home, never install at fetch time.** Run `scripts/fetch.py owner/repo --receipt <receipt.json>`. It clones shallow, records the commit SHA and a sha256 manifest, vets automatically, and quarantines BLOCKED fetches by renaming them. It never runs install hooks, setup scripts, or any code from the fetched repo. Everything Da Homi brings in lands in one visible place (a `da-homi-cache/` or the house's existing repos/skills folders), never scattered. The fetch must be bound to a hunt receipt: the repo has to be one the loop actually found and scored, and it must not match the memory file's Never install list.
+
+   Pin the fetch whenever the ref is known (v2.1). The pin option takes a tag, a full SHA, or a short SHA, and fetch.py checks the commit it got against it: a full SHA reaches that exact commit even after the branch moves, a tag reaches the commit the tag names, and a short SHA only matches the tip of the default branch. PIN MISMATCH moves the fetch aside and exits 1, so treat it like a refusal and find out why. Before reusing a cached fetch, run fetch.py again with the same pin and the verify option, which never clones: PIN OK exits 0, PIN DRIFT exits 1, and a tag pin verifies only against a fetch made with that tag. An unpinned fetch prints the short SHA to pin next time, so record it in the memory file with the install. The manifest also carries the candidate's provenance flags from the hunt receipt, plus no_tags when the remote has no tags. Mention the flags that matter when you report the find, but never treat one as a block, because flags never refuse a fetch, never change a score, and never change an exit code.
+
+   ```
+   python3 scripts/fetch.py owner/repo --receipt <receipt.json> --pin <tag or sha>
+   python3 scripts/fetch.py owner/repo --pin <tag or sha> --verify
+   ```
+
 6. **Install separately, hooks disabled.** Install is its own step after the vet, and it is not human-gated by Da Homi: the host's approval rules are the gate that already exists. Read the install path first. Disable install hooks: `npm install --ignore-scripts`, and read any setup.py or build file before running it. Do not let a trial command install anything unless you pass `--allow-install` to `trial.py` on purpose, and that allowance is recorded.
 7. **Test on a small real case.** Run `scripts/trial.py <dir> -- <test command>` with a timeout. A tool that installs is not a tool that works. Run the smallest end-to-end test that proves it does the job. Trial does not sandbox by default, because legitimate tools need their environment, auth, and network to prove they work. Pass `--fresh-home` when the test does not need the real HOME.
 8. **Finish the original task.** The hunt was never the task. Deliver the outcome the user asked for, using the new capability.
@@ -87,3 +95,14 @@ Da Homi has a face, and it has a home setup. Both live in their own files so thi
 
 - Avatar, states, and design: `assets/AVATAR.md`
 - In 19Keys' house, the github skill, hunt engine, and scheduled mode: `assets/HOUSE.md`
+
+## Automatic updates (v2.2)
+
+An installed copy updates itself from the Hub, privately. The Hub publishes a version manifest at one stable URL (format in `assets/update-manifest.example.json`), and the member's token gates both the manifest and the download. Check first, then apply:
+
+```
+python3 scripts/update.py check --manifest <hub manifest url>
+python3 scripts/update.py apply --manifest <hub manifest url>
+```
+
+Check exits 0 for up to date and 3 for update available. Apply backs the install up first, swaps the skill files, never overwrites the live `DA_HOMI_MEMORY.md`, and never touches `da-homi-cache/`. A sha256 mismatch refuses the update with nothing changed, and an unsigned package needs `--allow-unsigned` passed on purpose. The token comes from `--token` or `DA_HOMI_UPDATE_TOKEN` and is never printed. This is the answer to fresh ZIPs every time: the Hub is the update channel, and the member token is the gate, so nothing about Da Homi ever has to go public to stay current.
