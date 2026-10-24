@@ -7,12 +7,16 @@ search; falls back to the unauthenticated GitHub API.
 Usage:
     python3 hub_search.py "llm model router" [--limit 10] [--json]
 
-Scoring favors: actually matching the query (GitHub's own relevance order is
-the base), stars (log scale), recent activity, a real license, and penalizes
-forks. This ranks; it does not vet. Vetting is step 4 of the Da Homi loop and
-is done by reading the code before anything runs.
+Scoring favors: actually matching the query, then GitHub's own relevance
+order as the base, stars (log scale), recent activity, a real license, and
+penalizes forks. V1 sorted by stars, which replaced relevance with
+popularity and let a famous repo that mentions the words beat a niche tool
+that does the task. That sort is gone.
+
+This ranks; it does not vet. Vetting is step 4 of the Da Homi loop and
+is done by vet.py plus a human reading every REVIEW before anything runs.
 """
-import argparse, json, math, os, subprocess, sys, urllib.parse, urllib.request
+import argparse, json, math, os, re, subprocess, sys, urllib.parse, urllib.request
 from datetime import datetime, timezone
 
 API = "https://api.github.com/search/repositories"
@@ -29,8 +33,9 @@ def gh_token():
 
 
 def search(query, limit):
+    # No sort parameter: GitHub's default is best match (relevance).
     q = urllib.parse.quote(query)
-    url = f"{API}?q={q}&sort=stars&order=desc&per_page={min(limit * 3, 100)}"
+    url = f"{API}?q={q}&per_page={min(limit * 3, 100)}"
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                 "User-Agent": "da-homi-hub-search"})
     tok = gh_token()
@@ -40,9 +45,10 @@ def search(query, limit):
         return json.loads(resp.read().decode("utf-8")).get("items", [])
 
 
-def score(item):
+def score(item, query="", position=0):
     stars = item.get("stargazers_count", 0)
-    s = math.log10(stars + 1) * 20
+    # Stars are a signal, not the decision: capped, so relevance can win.
+    s = min(50.0, math.log10(stars + 1) * 20)
     pushed = item.get("pushed_at") or ""
     try:
         age_days = (datetime.now(timezone.utc) - datetime.fromisoformat(pushed.replace("Z", "+00:00"))).days
@@ -62,6 +68,13 @@ def score(item):
         s -= 30
     if (item.get("description") or "").strip():
         s += 5
+    # Relevance position bonus: earlier in GitHub's best-match order scores higher.
+    s += max(0, 30 - position * 3)
+    # Query term overlap bonus: does it actually talk about the task?
+    terms = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) >= 3]
+    if terms:
+        hay = ((item.get("full_name") or "") + " " + (item.get("description") or "")).lower()
+        s += min(45, 15 * sum(1 for t in terms if t in hay))
     return round(s, 1)
 
 
@@ -76,7 +89,7 @@ def main():
     except Exception as e:
         print(f"SEARCH FAILED: {e}", file=sys.stderr)
         return 1
-    ranked = sorted(items, key=score, reverse=True)[: args.limit]
+    ranked = sorted(enumerate(items), key=lambda p: score(p[1], args.query, p[0]), reverse=True)[: args.limit]
     rows = [{
         "repo": it["full_name"],
         "url": it["html_url"],
@@ -84,9 +97,9 @@ def main():
         "license": (it.get("license") or {}).get("spdx_id"),
         "pushed_at": (it.get("pushed_at") or "")[:10],
         "fork": bool(it.get("fork")),
-        "score": score(it),
+        "score": score(it, args.query, position),
         "description": (it.get("description") or "").strip(),
-    } for it in ranked]
+    } for position, it in ranked]
     if args.json:
         print(json.dumps(rows, indent=2))
     else:
