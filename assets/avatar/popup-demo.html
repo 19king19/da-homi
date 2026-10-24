@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Da Homi — pop-up demo (2D / 3D switch)</title>
+<style>
+  body { margin:0; background:#101014; color:#EDEDF2; font-family: Inter, system-ui, sans-serif; min-height:100vh; }
+  .stage { position:relative; height:78vh; overflow:hidden;
+    background: radial-gradient(60% 50% at 50% 40%, #1B1B22 0%, #101014 70%); }
+  .bubble { position:absolute; left:50%; bottom:46%; transform:translateX(-50%) scale(.6);
+    background:#17171D; border:1px solid #2A2A33; color:#EDEDF2; border-radius:16px;
+    padding:12px 16px; font-size:15px; max-width:320px; text-align:center; opacity:0; }
+  .bubble b { color:#C9A35A; }
+  .homi { position:absolute; left:50%; bottom:6%; width:300px; margin-left:-150px; opacity:0; }
+  .homi img { width:100%; display:block; border-radius:18px; }
+  .pop { animation: pop .65s cubic-bezier(.2,1.6,.35,1) forwards; }
+  @keyframes pop { 0% { transform: translateY(70px) scale(.6); opacity:0; }
+    60% { transform: translateY(-14px) scale(1.04); opacity:1; }
+    100% { transform: translateY(0) scale(1); opacity:1; } }
+  .bob { animation: bob 2.6s ease-in-out infinite; }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+  .show { animation: fadein .3s ease .35s forwards; }
+  @keyframes fadein { to { opacity:1; transform:translateX(-50%) scale(1); } }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; padding:16px; }
+  button { background:#17171D; color:#EDEDF2; border:1px solid #2A2A33; border-radius:999px;
+    padding:9px 16px; font-size:14px; cursor:pointer; }
+  button:hover { border-color:#C9A35A; color:#C9A35A; }
+  button.gold { background:#C9A35A; color:#101014; border-color:#C9A35A; font-weight:600; }
+  .tag { position:absolute; top:14px; right:16px; font-size:12px; letter-spacing:.12em;
+    color:#C9A35A; border:1px solid #2A2A33; border-radius:999px; padding:5px 11px; background:#17171D; }
+  p.note { text-align:center; color:#8A8A96; font-size:13px; margin:0 16px 20px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="tag" id="bodyTag">BODY: —</div>
+    <div class="bubble" id="bubble"></div>
+    <div class="homi" id="homi"><div class="bob" id="bob"><img id="homiImg" alt="Da Homi"></div></div>
+  </div>
+  <div class="bar">
+    <button class="gold" onclick="popIn(true)">Ask Da Homi</button>
+    <button onclick="setState('hunting')">Hunting</button>
+    <button onclick="setState('success')">Got it</button>
+    <button onclick="setState('unlock')">Unlock</button>
+    <button onclick="flipBody()">Switch body</button>
+  </div>
+  <p class="note">Every pop-in rolls a new body: sometimes 2D, sometimes 3D. Switch body swaps him mid-scene.</p>
+<script>
+  const BODIES = {
+    '2D': {
+      idle:    '../character/da-homi-v2-idle.webp',
+      hunting: '../character/da-homi-v2-searching.webp',
+      success: '../character/da-homi-v2-success.webp',
+      unlock:  '../character/da-homi-v2-unlock.webp'
+    },
+    '3D': {
+      idle:    '../character/da-homi-3d-idle.webp',
+      hunting: '../character/da-homi-3d-hunting.webp',
+      success: '../character/da-homi-3d-success.webp',
+      unlock:  '../character/da-homi-3d-key.webp'
+    }
+  };
+  const LINES = {
+    idle:    '<b>I got you, homie.</b> One second.',
+    hunting: '<b>Hunting.</b> Checking it before I trust it.',
+    success: '<b>Got it.</b> Task handled.',
+    unlock:  '<b>Turning the key.</b> Unlocked.'
+  };
+  let body = '2D', state = 'idle';
+  const homi = document.getElementById('homi'), img = document.getElementById('homiImg'),
+        bubble = document.getElementById('bubble'), tag = document.getElementById('bodyTag');
+  function render() {
+    img.src = BODIES[body][state];
+    bubble.innerHTML = LINES[state];
+    tag.textContent = 'BODY: ' + body;
+  }
+  function popIn(roll) {
+    if (roll) body = Math.random() < 0.5 ? '2D' : '3D';
+    state = 'idle';
+    homi.classList.remove('pop'); bubble.classList.remove('show');
+    void homi.offsetWidth;
+    render();
+    homi.classList.add('pop'); bubble.classList.add('show');
+  }
+  function setState(s) { state = s; render(); bubble.classList.add('show'); homi.style.opacity = 1; }
+  function flipBody() { body = body === '2D' ? '3D' : '2D'; render(); }
+  popIn(true);
+</script>
+</body>
+</html>
